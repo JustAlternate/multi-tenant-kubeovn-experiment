@@ -1,0 +1,17 @@
+# Nix build outputs
+result
+result-*
+
+# Terraform / Pulumi state
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Kubernetes
+kubeconfig
+*.kubeconfig
+
+# Secrets
+.env
+*.pem
+*.key
