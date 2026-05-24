@@ -19,53 +19,20 @@ resource "null_resource" "NixOS_install" {
     private_key = file("~/.ssh/id_ed25519")
     host_key    = null
     agent       = false
-    timeout     = "60s"
+    timeout     = "1800s"
   }
 
   provisioner "remote-exec" {
     inline = [
-      "nohup bash -c 'curl https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect | PROVIDER=hetznercloud NIX_CHANNEL=nixos-25.11 bash' > /tmp/infect.log 2>&1 & disown",
+      "if grep -q NixOS /etc/os-release 2>/dev/null; then echo 'Already NixOS, skipping infect'; exit 0; fi",
+      "curl -fsSL https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect -o /tmp/nixos-infect",
+      "chmod +x /tmp/nixos-infect",
+      "PROVIDER=hetznercloud NIX_CHANNEL=nixos-25.11 /tmp/nixos-infect",
     ]
   }
 }
 
 resource "time_sleep" "wait_reboot" {
   depends_on      = [null_resource.NixOS_install]
-  create_duration = "240s"
-}
-
-resource "null_resource" "rebuild" {
-  depends_on = [time_sleep.wait_reboot]
-
-  connection {
-    type        = "ssh"
-    user        = "root"
-    host        = var.target_host
-    private_key = file("~/.ssh/id_ed25519")
-    host_key    = null
-    agent       = false
-    timeout     = "600s"
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "mkdir -p /root/nixcfg/sac",
-    ]
-  }
-
-  provisioner "file" {
-    source      = "${path.root}/../flake.nix"
-    destination = "/root/nixcfg/flake.nix"
-  }
-
-  provisioner "file" {
-    source      = "${path.root}/../sac/"
-    destination = "/root/nixcfg/sac/"
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "nixos-rebuild switch --flake /root/nixcfg#nodeNixos",
-    ]
-  }
+  create_duration = "300s"
 }

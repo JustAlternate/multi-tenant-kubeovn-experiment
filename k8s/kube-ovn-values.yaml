@@ -1,0 +1,76 @@
+replicaCount: 1
+
+networking:
+  NET_STACK: ipv4
+  NETWORK_TYPE: geneve
+  DEFAULT_SUBNET: ovn-default
+  NODE_SUBNET: join
+  POD_CIDR: "10.16.0.0/16"
+  SVC_CIDR: "10.96.0.0/12"
+  JOIN_CIDR: "100.64.0.0/16"
+  TUNNEL_TYPE: geneve
+
+func:
+  ENABLE_LB: true
+  ENABLE_NP: true
+  ENABLE_EIP_SNAT: true
+  ENABLE_EXTERNAL_VPC: true
+
+ipv4:
+  POD_CIDR: "10.16.0.0/16"
+  SVC_CIDR: "10.96.0.0/12"
+  JOIN_CIDR: "100.64.0.0/16"
+
+performance:
+  MODULES: "kube_ovn_fastpath.ko"
+  RPMS: ""
+
+image:
+  repository: kubeovn/kube-ovn
+  tag: v1.13.4
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+debug:
+  ENABLE_MIRROR: false
+
+ovn-central:
+  requests:
+    cpu: 300m
+    memory: 200Mi
+  limits:
+    cpu: 3
+    memory: 4Gi
+
+ovs-ovn:
+  requests:
+    cpu: 200m
+    memory: 200Mi
+  limits:
+    cpu: 2
+    memory: 2Gi
+
+kube-ovn-controller:
+  requests:
+    cpu: 200m
+    memory: 200Mi
+  limits:
+    cpu: 2
+    memory: 2Gi
+
+kube-ovn-cni:
+  requests:
+    cpu: 100m
+    memory: 100Mi
+  limits:
+    cpu: 1
+    memory: 1Gi
+
+kube-ovn-pinger:
+  requests:
+    cpu: 100m
+    memory: 100Mi
+  limits:
+    cpu: 1
+    memory: 1Gi

@@ -4,18 +4,16 @@
 
 Build a production-like multi-tenant Kubernetes environment on 3 Hetzner cloud nodes, using **KubeOVN** as the SDN overlay (logical switches, VPCs, subnet isolation) with **Cilium in policy-only mode** for advanced network policies and Hubble observability.
 
-**Stack:** kubeadm + KubeOVN (CNI) + Cilium (policy-only) + FluxCD + LGTM (Grafana/Loki/Mimir/Tempo)
+**Stack:** kubeadm + KubeOVN (CNI) + Cilium (policy-only) 
 
 ## Success Metrics
 
-- [ ] 3-node cluster provisioned via NixOS + kubeadm, all nodes Ready
+- [ ] 3-node HA cluster provisioned via Terraform and NixOS + kubeadm and kube-vip, all nodes Ready
 - [ ] KubeOVN installed as primary CNI, OVN control plane healthy
 - [ ] 3 isolated tenants created via KubeOVN VPCs/Subnets — pods in tenant A cannot reach pods in tenant B
 - [ ] Cross-tenant communication via OVN logical routers (controlled, explicit)
 - [ ] Cilium policy-only mode operational: Hubble shows flows, CiliumNetworkPolicy enforced
 - [ ] OVN traffic visible in Hubble (Cilium observes KubeOVN-managed pods)
-- [ ] LGTM stack deployed via FluxCD, monitoring KubeOVN metrics + cluster health
-- [ ] Chaos test passes: tenant isolation verified via network probes
 
 ---
 
@@ -60,30 +58,20 @@ Before touching any infrastructure.
 
 ---
 
-## Phase 1 — Provision 3 NixOS Nodes on Hetzner (`1 day`)
+## Phase 1 — Provision 3 NixOS Nodes on Hetzner
 
-- [ ] Create 3 `nixosConfigurations` in `~/nixcfg/flake.nix`: `labNode1`, `labNode2`, `labNode3`
-- [ ] Create shared profile `profiles/nixos/lab/default.nix`:
-  - SSH enabled, firewall open for K8s ports (6443, 2379-2380, 10250-10257, 30000-32767, 6641-6642, 8472)
-  - Swap disabled (`boot.kernel.sysctl."vm.swappiness" = 0`)
-  - Kernel modules: `br_netfilter`, `overlay`
-  - `networking.firewall.trustedInterfaces = [ "geneve_sys_6081" "ovn0" ]`
-  - `systemd.network` — configure private IP on secondary interface
-- [ ] Provision 3 × Hetzner CX22 (2 vCPU, 4 GB RAM, 40 GB SSD)
-  - Install NixOS via rescue + nixos-infect, or build custom ISO
-  - Attach to Hetzner private network (vSwitch)
-- [ ] Verify:
+- [X] Create a reproducible `nixosConfigurations` in `./flake.nix` with the minimal required configuration for the nodes to install kubernetes and kube-ovn.
+- [X] Provision 3 × Hetzner CAX22 (ARM 2 vCPU, 4 GB RAM, 40 GB SSD) with opentofu Hetzner provider
+- [X] Verify:
   - SSH to all 3 nodes
   - Private IPs reachable between all nodes
-  - Hostnames resolve (lab-node-1, lab-node-2, lab-node-3)
-
-**Success:** `ssh lab-node-1 && ping <lab-node-2-private-ip>` OK
+  - Hostnames resolve (node-1, node-2, node-3)
 
 ---
 
-## Phase 2 — Install Kubernetes with kubeadm + KubeOVN (`1-2 days`)
+## Phase 2 — Install Kubernetes with kubeadm + KubeOVN
 
-- [ ] Install container runtime: `containerd` (NixOS: `virtualisation.containerd.enable = true`)
+- [X] Install container runtime: `containerd`
   - Verify with `crictl ps`
 - [ ] Install `pkgs.kubeadm`, `pkgs.kubelet`, `pkgs.kubectl` via NixOS
   - Configure kubelet extra args: `--node-ip=<private-ip>`, `--cgroup-driver=systemd`

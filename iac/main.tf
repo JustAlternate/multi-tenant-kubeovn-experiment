@@ -96,15 +96,3 @@ output "node_2_ip" {
 output "node_3_ip" {
   value = hcloud_server.node-3.ipv4_address
 }
-
-output "ssh_command_node_1" {
-  value = "ssh root@${hcloud_server.node-1.ipv4_address}"
-}
-
-output "ssh_command_node_2" {
-  value = "ssh root@${hcloud_server.node-2.ipv4_address}"
-}
-
-output "ssh_command_node_3" {
-  value = "ssh root@${hcloud_server.node-3.ipv4_address}"
-}

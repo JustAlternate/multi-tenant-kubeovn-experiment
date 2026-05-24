@@ -33,7 +33,7 @@
           specialArgs = { inherit inputs; };
           inherit system;
           modules = [
-            ./sac/
+            ./sac
             { nixpkgs.overlays = nixos-overlays; }
           ];
         };
