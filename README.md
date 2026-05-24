@@ -1,23 +1,22 @@
-# Multi-Tenant KubeOVN + Cilium Experiment
+# Multi-Tenant KubeOVN Experiment
 
 ## Objective
 
-Build a production-like multi-tenant Kubernetes environment on 3 Hetzner cloud nodes, using **KubeOVN** as the SDN overlay (logical switches, VPCs, subnet isolation) with **Cilium in policy-only mode** for advanced network policies and Hubble observability.
+Build a production-like multi-tenant Kubernetes environment on 3 Hetzner cloud nodes, using **KubeOVN** as the SDN overlay (logical switches, VPCs, subnet isolation).
 
-**Stack:** kubeadm + KubeOVN (CNI) + Cilium (policy-only) 
+**Stack:** Ubuntu 24.04 + kubeadm + KubeOVN (CNI)
 
 ## Success Metrics
 
-- [ ] 3-node HA cluster provisioned via Terraform and NixOS + kubeadm and kube-vip, all nodes Ready
-- [ ] KubeOVN installed as primary CNI, OVN control plane healthy
+- [x] 3-node cluster provisioned via Terraform + bash script, all nodes Ready
+- [x] KubeOVN installed via Helm, OVN raft cluster healthy
 - [ ] 3 isolated tenants created via KubeOVN VPCs/Subnets — pods in tenant A cannot reach pods in tenant B
 - [ ] Cross-tenant communication via OVN logical routers (controlled, explicit)
 - [ ] Cilium policy-only mode operational: Hubble shows flows, CiliumNetworkPolicy enforced
-- [ ] OVN traffic visible in Hubble (Cilium observes KubeOVN-managed pods)
 
 ---
 
-## Phase 0 — Learn the Concepts (`2-3 days`)
+## Phase 0 — Learn the Concepts
 
 Before touching any infrastructure.
 
@@ -42,12 +41,6 @@ Before touching any infrastructure.
 - **Policy Audit Mode**: Deploy policies without enforcing (visibility first, then enforce)
 - **Hubble**: Flow observability, service map, network policy verdicts
 - **CiliumNetworkPolicy vs K8s NetworkPolicy**: CRD superset (L7, DNS, FQDN, entities)
-- **Endpoint Identity**: Cilium assigns identity labels to pods (used in policy enforcement)
-
-### OVN Underlay / Debugging
-
-- `ovn-nbctl`, `ovn-sbctl`, `ovs-vsctl` — debugging commands
-- `kubectl ko` — KubeOVN CLI helper (wraps kubectl + ovn commands)
 
 ### Resources
 
@@ -58,52 +51,42 @@ Before touching any infrastructure.
 
 ---
 
-## Phase 1 — Provision 3 NixOS Nodes on Hetzner
+## Phase 1 — Provision 3 Ubuntu Nodes on Hetzner
 
-- [X] Create a reproducible `nixosConfigurations` in `./flake.nix` with the minimal required configuration for the nodes to install kubernetes and kube-ovn.
-- [X] Provision 3 × Hetzner CAX22 (ARM 2 vCPU, 4 GB RAM, 40 GB SSD) with opentofu Hetzner provider
-- [X] Verify:
-  - SSH to all 3 nodes
-  - Private IPs reachable between all nodes
-  - Hostnames resolve (node-1, node-2, node-3)
+- [x] Provision 3 × Hetzner CAX11 (ARM 2 vCPU, 4 GB RAM, 40 GB SSD) via OpenTofu
+- [x] Hetzner Cloud Network for private IPs (10.0.1.0/24)
+- [x] Bootstrap script (`scripts/bootstrap-cluster.sh`) handles everything:
+  - apt install containerd, kubeadm, kubelet, kubectl, helm, conntrack
+  - Kernel modules: br_netfilter, overlay, openvswitch, geneve, vxlan
+  - Sysctl: bridge-nf-call-iptables, ip_forward, IPv6 forwarding
+  - Firewall: K8s ports + OVN ports (6641-6644) + private network (10.0.0.0/16)
+  - Netplan config for enp7s0 (private network, MTU 1450)
+  - kubeadm init + join, KubeOVN Helm install
+- [x] Verify: SSH to all 3 nodes, private IPs reachable between nodes
 
 ---
 
 ## Phase 2 — Install Kubernetes with kubeadm + KubeOVN
 
-- [X] Install container runtime: `containerd`
-  - Verify with `crictl ps`
-- [ ] Install `pkgs.kubeadm`, `pkgs.kubelet`, `pkgs.kubectl` via NixOS
-  - Configure kubelet extra args: `--node-ip=<private-ip>`, `--cgroup-driver=systemd`
-  - Enable kubelet systemd service
-- [ ] **Init control plane** (node 1):
-  ```
-  kubeadm init \
-    --pod-network-cidr=10.16.0.0/16 \
-    --apiserver-advertise-address=<private-ip> \
-    --upload-certs
-  ```
-  - Copy kubeconfig: `mkdir ~/.kube && cp /etc/kubernetes/admin.conf ~/.kube/config`
-- [ ] **Join workers** (node 2, node 3): `kubeadm join ...`
-- [ ] **Install KubeOVN**:
-  ```bash
-  kubectl apply -f https://raw.githubusercontent.com/kubeovn/kube-ovn/release-1.13/dist/images/install.sh
-  # Or use Helm for more control
-  ```
-  - Wait for: `ovn-central`, `ovs-ovn`, `kube-ovn-controller`, `kube-ovn-cni` DaemonSets to be Running
-  - Verify: `kubectl get pods -n kube-system`
-- [ ] Validate:
+- [x] **Init control plane** (node-1):
+  - `controlPlaneEndpoint: <public-ip>:6443`
+  - `podSubnet: 10.16.0.0/16`, `serviceSubnet: 10.96.0.0/12`
+  - `advertiseAddress: <public-ip>` (Hetzner nodes have public IPs available)
+- [x] **Join control plane** (node-2, node-3): `kubeadm join ... --control-plane`
+- [x] **Install KubeOVN** via Helm (`kubeovn/kube-ovn` v1.16.1):
+  - `MASTER_NODES: "<pub1>,<pub2>,<pub3>"` — must match node InternalIP
+  - `ENABLE_BIND_LOCAL_IP: true` — OVN binds to node IP
+  - `NETWORK_TYPE: geneve`, `TUNNEL_TYPE: geneve`
+  - `POD_CIDR: 10.16.0.0/16`, `SVC_CIDR: 10.96.0.0/12`
+  - Label all nodes: `kube-ovn/role=master`
+- [x] Validate:
   - `kubectl get nodes` → 3/3 Ready
-  - `kubectl ko nbctl show` → OVN logical topology visible
-  - `kubectl get subnet` → default subnet created
-  - Deploy test pod → IP from `10.16.0.0/16`
-  - pod-to-pod ping across nodes → works
-
-**Success:** `kubectl get nodes` shows 3 Ready, `kubectl ko nbctl show` shows OVN topology
+  - `kubectl get subnet` → `ovn-default` and `join` subnets created
+  - All pods in `kube-system` Running (ovn-central, ovs-ovn, kube-ovn-controller, kube-ovn-cni, kube-ovn-pinger, coredns)
 
 ---
 
-## Phase 3 — Multi-Tenant Network Setup (`1 day`)
+## Phase 3 — Multi-Tenant Network Setup
 
 ### Target Topology
 
@@ -137,12 +120,11 @@ Default subnet (10.16.0.0/16) ────────────────�
     gateway: 10.35.0.1
     namespaces:
       - lab-tenant-a
-      # pods in lab-tenant-a auto-join this subnet
   ```
 - [ ] Deploy test pods in each tenant namespace (`nginx`)
 - [ ] Verify:
   - Pods get IPs from their respective subnets (`kubectl get pod -o wide`)
-  - `kubectl ko nbctl show` → 4 logical switches visible
+  - 4 logical switches visible in OVN topology
 - [ ] **Isolation test:** pod in tenant-a cannot ping pod in tenant-b
   - Different VPC = no route between logical switches
   - Verify egress from each tenant works (default route/gateway handles internet)
@@ -155,7 +137,7 @@ Default subnet (10.16.0.0/16) ────────────────�
 
 ---
 
-## Phase 4 — Cilium Policy-Only Mode (`1 day`)
+## Phase 4 — Cilium Policy-Only Mode
 
 - [ ] Install Cilium Helm repo
 - [ ] Deploy Cilium in chaining mode:
@@ -174,99 +156,46 @@ Default subnet (10.16.0.0/16) ────────────────�
 - [ ] Verify coexistence:
   - `cilium status` — all agents OK
   - Pods still get KubeOVN IPs (Cilium not managing IPAM)
-  - `cilium connectivity test` passes (uses existing KubeOVN networking)
+  - `cilium connectivity test` passes
 - [ ] Enable Hubble UI:
   ```bash
   cilium hubble port-forward &
   # Browse to localhost:12000
   ```
 - [ ] Deploy sample apps in tenant namespaces → observe flows in Hubble
-- [ ] Write `CiliumNetworkPolicy` per tenant:
-  ```yaml
-  apiVersion: cilium.io/v2
-  kind: CiliumNetworkPolicy
-  metadata:
-    name: tenant-a-default-deny
-    namespace: lab-tenant-a
-  spec:
-    endpointSelector: {}
-    ingress:
-      - fromEndpoints:
-          - matchLabels:
-              k8s:io.kubernetes.pod.namespace: lab-tenant-a
-    egress:
-      - toEndpoints:
-          - matchLabels:
-              k8s:io.kubernetes.pod.namespace: kube-system
-            toPorts:
-              - ports:
-                  - port: "53"
-                    protocol: UDP
-  ```
+- [ ] Write `CiliumNetworkPolicy` per tenant (default-deny + DNS egress)
 - [ ] Verify enforcement:
   - `hubble observe` shows policy verdicts (ALLOWED / DENIED)
-  - Test: pod in tenant-a-ns cannot reach another pod in tenant-a-ns if policy denies it
   - Cilium policy acts as a **second layer** on top of KubeOVN VPC isolation
 
 **Success:** Hubble shows all flows with policy verdicts, CiliumNetworkPolicy enforced
 
 ---
 
-## Phase 5 — LGTM Stack via FluxCD (`1-2 days`)
+## Phase 5 — LGTM Stack via FluxCD
 
-- [ ] **Bootstrap FluxCD**:
-  ```bash
-  flux bootstrap github \
-    --owner=<github-user> \
-    --repository=multi-tenant-KubeOVN-cilium-experiment \
-    --path=./clusters/lab
-  ```
-- [ ] **Grafana** — deploy via Flux `HelmRelease`
-  - Import KubeOVN dashboards (community: Kube-OVN overview, OVN DB, OVS)
-  - Import Cilium dashboards (Hubble metrics, policy verdicts)
-  - Import node metrics (Node Exporter)
-- [ ] **Loki** — ship container logs via Promtail or Grafana Alloy
-  - Configure LogQL queries for OVN components
+- [ ] **Bootstrap FluxCD**
+- [ ] **Grafana** — KubeOVN dashboards, Cilium dashboards, node metrics
+- [ ] **Loki** — container logs via Promtail or Grafana Alloy
 - [ ] **Mimir** — long-term metrics from kube-state-metrics + KubeOVN metrics
-  - Scrape `/metrics` from `ovn-central`, `ovs-ovn`, `kube-ovn-controller`
-- [ ] **Alerting**:
-  - OVN DB leader changes
-  - Tunnel health between nodes
-  - Subnet IP exhaustion (>80% used)
-  - Pod creation failures (CNI errors)
+- [ ] **Alerting**: OVN DB leader changes, tunnel health, subnet IP exhaustion, CNI errors
 
 **Success:** Grafana dashboards show KubeOVN + Cilium metrics, logs queryable in Loki
 
 ---
 
-## Phase 6 — Chaos & Validation (`1 day`)
+## Phase 6 — Chaos & Validation
 
-- [ ] **Automated isolation test:**
-  - Script that deploys `netshoot` probe pods in all 3 tenant namespaces
-  - Continuous ping sweep: A→B, A→C, B→A, B→C, C→A, C→B
-  - Expected: all pings fail (0% success)
-  - In-tenant ping: A-pod1→A-pod2 passes
-- [ ] **Node failure:**
-  - Stop kubelet on node 2
-  - Verify: pods rescheduled, KubeOVN IPAM reallocates correctly
-  - Verify: OVN control plane healthy (2/3 ovn-central remaining, quorum OK)
-  - Verify: tenant isolation still enforced on remaining 2 nodes
-  - Restore node 2 → verify rejoin
-- [ ] **OVN control plane resilience:**
-  - Kill ovn-central pod on the current leader
-  - Measure time to new leader election (< 30s target)
-  - Verify: no pod connectivity disruption during election
-  - Verify: new pods can still be scheduled
-- [ ] **Cilium policy audit toggle:**
-  - Set `policyEnforcementMode=audit` on a CiliumNetworkPolicy
-  - Verify Hubble shows "would be denied" (audit mode)
-  - Set back to `enforcing` → verify actual drops
+- [ ] **Automated isolation test:** netshoot probe pods in all 3 tenant namespaces, ping sweep
+- [ ] **Node failure:** stop kubelet on node-2, verify pods reschedule, OVN quorum OK
+- [ ] **OVN control plane resilience:** kill ovn-central leader, measure election time (< 30s)
+- [ ] **Cilium policy audit toggle:** audit mode shows "would be denied" in Hubble
 
 **Success:** All chaos scenarios pass, tenant isolation intact throughout
 
 ---
 
-## Phase 7 — Document & Tear Down (`0.5 day`)
+## Phase 7 — Document & Tear Down
 
 - [ ] ASCII diagram of the network topology (VPCs, logical switches, OVN routers)
 - [ ] Screenshots: Hubble service map, Grafana KubeOVN dashboard
@@ -280,26 +209,65 @@ Default subnet (10.16.0.0/16) ────────────────�
 | Phase | Description | Est. Effort |
 |-------|-------------|-------------|
 | 0 | Concepts & reading | 2-3 days |
-| 1 | Provision 3 NixOS nodes | 1 day |
-| 2 | kubeadm + KubeOVN install | 1-2 days |
+| 1 | Provision 3 Ubuntu nodes | 1 day |
+| 2 | kubeadm + KubeOVN install | 1 day |
 | 3 | Multi-tenant SDN setup | 1 day |
 | 4 | Cilium policy-only + Hubble | 1 day |
 | 5 | LGTM stack + FluxCD | 1-2 days |
 | 6 | Chaos & validation | 1 day |
 | 7 | Documentation & cleanup | 0.5 day |
-| **Total** | | **8-10 days** |
+| **Total** | | **7-9 days** |
 
 ---
 
-## Success Metrics Summary
+## Infrastructure
 
-| # | Metric | How to verify |
-|---|--------|---------------|
-| 1 | 3 nodes Ready | `kubectl get nodes` |
-| 2 | KubeOVN topology healthy | `kubectl ko nbctl show` → 4 logical switches |
-| 3 | Tenant isolation verified | Script: 0 cross-tenant reachability |
-| 4 | Hubble sees all flows | `hubble observe` → flows + policy verdicts |
-| 5 | CiliumNetworkPolicy enforced | Default-deny per tenant, DNS egress allowed |
-| 6 | LGTM stack operational | Grafana dashboards populated with metrics |
-| 7 | OVN HA functional | Leader election after kill `ovn-central` |
-| 8 | Everything deployed via FluxCD | `flux get all` → all resources synced |
+### Nodes
+
+| Node | Public IP | Private IP | Role |
+|------|-----------|------------|------|
+| node-1 | 178.105.181.208 | 10.0.1.11 | control-plane |
+| node-2 | 178.105.184.10 | 10.0.1.12 | control-plane |
+| node-3 | 178.105.178.225 | 10.0.1.13 | control-plane |
+
+### Network
+
+- Pod CIDR: `10.16.0.0/16`
+- Service CIDR: `10.96.0.0/12`
+- Join CIDR: `100.64.0.0/16`
+- Private network: `10.0.0.0/16` (Hetzner Cloud Network)
+- Tunnel type: GENEVE
+
+### Key Commands
+
+```bash
+# Deploy infrastructure
+cd iac && tofu apply
+
+# Bootstrap cluster (provision + init + join + KubeOVN)
+./scripts/bootstrap-cluster.sh all
+
+# Individual steps
+./scripts/bootstrap-cluster.sh provision
+./scripts/bootstrap-cluster.sh init
+./scripts/bootstrap-cluster.sh join
+./scripts/bootstrap-cluster.sh kube-ovn
+./scripts/bootstrap-cluster.sh verify
+
+# Kubeconfig
+export KUBECONFIG=$(pwd)/kubeconfig
+
+# KubeOVN status
+kubectl get pods -n kube-system
+kubectl get nodes -o wide
+kubectl get subnet
+```
+
+---
+
+## Pitfalls Encountered
+
+1. **OVN raft ports 6643/6644 must be open in firewall** — KubeOVN docs list 4 ports (6641-6644) but it's easy to miss the raft ports. Without them, ovn-central pods enter CrashLoopBackOff with "split-brain recovery" errors.
+2. **NixOS broke Hetzner private networking** — nixos-infect replaced the network config and lost the private interface. Ubuntu works out of the box.
+3. **`MASTER_NODES` must match node InternalIP** — If `ENABLE_BIND_LOCAL_IP=true`, the host IP must be in NODE_IPS. On Hetzner, InternalIP is the public IP.
+4. **`kubectl ko` plugin not installed by default** — The KubeOVN Helm chart doesn't install the `kubectl ko` CLI helper. Use `ovn-nbctl` / `ovn-sbctl` inside ovn-central pods directly.

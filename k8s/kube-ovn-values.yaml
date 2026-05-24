@@ -1,4 +1,6 @@
-replicaCount: 1
+replicaCount: 3
+
+MASTER_NODES: "178.105.181.208,178.105.184.10,178.105.178.225"
 
 networking:
   NET_STACK: ipv4
@@ -27,7 +29,7 @@ performance:
 
 image:
   repository: kubeovn/kube-ovn
-  tag: v1.13.4
+  tag: v1.16.1
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

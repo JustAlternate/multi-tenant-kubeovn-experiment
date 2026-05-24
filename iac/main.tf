@@ -28,8 +28,17 @@ resource "hcloud_network_subnet" "network_subnet" {
   ip_range     = "10.0.1.0/24"
 }
 
-resource "hcloud_server" "node-1" {
-  name        = "node-1"
+locals {
+  nodes = {
+    node-1 = "10.0.1.11"
+    node-2 = "10.0.1.12"
+    node-3 = "10.0.1.13"
+  }
+}
+
+resource "hcloud_server" "nodes" {
+  for_each    = local.nodes
+  name        = each.key
   server_type = "cax11"
   image       = "ubuntu-24.04"
   location    = "nbg1"
@@ -38,61 +47,18 @@ resource "hcloud_server" "node-1" {
 
   network {
     subnet_id = hcloud_network_subnet.network_subnet.id
-    ip        = "10.0.1.11"
+    ip        = each.value
   }
-}
-
-resource "hcloud_server" "node-2" {
-  name        = "node-2"
-  server_type = "cax11"
-  image       = "ubuntu-24.04"
-  location    = "nbg1"
-
-  ssh_keys = [hcloud_ssh_key.my_ssh_key.id]
-
-  network {
-    subnet_id = hcloud_network_subnet.network_subnet.id
-    ip        = "10.0.1.12"
-  }
-}
-
-resource "hcloud_server" "node-3" {
-  name        = "node-3"
-  server_type = "cax11"
-  image       = "ubuntu-24.04"
-  location    = "nbg1"
-
-  ssh_keys = [hcloud_ssh_key.my_ssh_key.id]
-
-  network {
-    subnet_id = hcloud_network_subnet.network_subnet.id
-    ip        = "10.0.1.13"
-  }
-}
-
-module "nixos_infect_node_1" {
-  source      = "./NixOS-install"
-  target_host = hcloud_server.node-1.ipv4_address
-}
-
-module "nixos_infect_node_2" {
-  source      = "./NixOS-install"
-  target_host = hcloud_server.node-2.ipv4_address
-}
-
-module "nixos_infect_node_3" {
-  source      = "./NixOS-install"
-  target_host = hcloud_server.node-3.ipv4_address
 }
 
 output "node_1_ip" {
-  value = hcloud_server.node-1.ipv4_address
+  value = hcloud_server.nodes["node-1"].ipv4_address
 }
 
 output "node_2_ip" {
-  value = hcloud_server.node-2.ipv4_address
+  value = hcloud_server.nodes["node-2"].ipv4_address
 }
 
 output "node_3_ip" {
-  value = hcloud_server.node-3.ipv4_address
+  value = hcloud_server.nodes["node-3"].ipv4_address
 }
