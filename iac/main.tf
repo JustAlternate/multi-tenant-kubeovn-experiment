@@ -39,9 +39,9 @@ locals {
 resource "hcloud_server" "nodes" {
   for_each    = local.nodes
   name        = each.key
-  server_type = "cax11"
+  server_type = "cpx22"
   image       = "ubuntu-24.04"
-  location    = "nbg1"
+  location    = "fsn1"
 
   ssh_keys = [hcloud_ssh_key.my_ssh_key.id]
 

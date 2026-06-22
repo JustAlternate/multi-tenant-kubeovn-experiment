@@ -8,6 +8,7 @@ IAC_DIR="$REPO_DIR/iac"
 POD_CIDR="10.16.0.0/16"
 SVC_CIDR="10.96.0.0/12"
 K8S_VERSION="1.31"
+KUBEVIRT_VERSION="v1.8.4"
 
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o UpdateHostKeys=no -o ConnectTimeout=10"
 
@@ -232,17 +233,60 @@ step_install_kube_ovn() {
   export KUBECONFIG="$REPO_DIR/kubeconfig"
   kubectl label node node-1 node-2 node-3 kube-ovn/role=master --overwrite
 
-  log "Installing KubeOVN via Helm..."
+  log "Templating MASTER_NODES into kube-ovn values..."
+  MASTER_NODES="${NODE1_PUB},${NODE2_PUB},${NODE3_PUB}"
+  TMP_VALUES="$(mktemp)"
+  sed "s|^MASTER_NODES: .*|MASTER_NODES: \"${MASTER_NODES}\"|" \
+    "$REPO_DIR/k8s/kube-ovn-values.yaml" > "$TMP_VALUES"
+
+  log "Installing KubeOVN via Helm (MASTER_NODES=${MASTER_NODES})..."
 
   helm repo add kubeovn https://kubeovn.github.io/kube-ovn 2>/dev/null || true
   helm repo update
 
   helm upgrade --install kube-ovn kubeovn/kube-ovn \
     --namespace kube-system \
-    --values "$REPO_DIR/k8s/kube-ovn-values.yaml" \
+    --values "$TMP_VALUES" \
     --wait --timeout 10m
 
+  rm -f "$TMP_VALUES"
   log "KubeOVN installed"
+}
+
+step_untaint_control_plane() {
+  log "Untainting control-plane nodes (all-control-plane lab cluster)..."
+  export KUBECONFIG="$REPO_DIR/kubeconfig"
+  kubectl taint nodes node-1 node-2 node-3 node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
+  log "Control-plane taints removed"
+}
+
+step_install_kubevirt() {
+  log "Installing KubeVirt ${KUBEVIRT_VERSION}..."
+  export KUBECONFIG="$REPO_DIR/kubeconfig"
+
+  log "Applying KubeVirt operator..."
+  kubectl apply -f "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml"
+
+  log "Applying KubeVirt CR (useEmulation=true, tolerates control-plane)..."
+  kubectl apply -f "$REPO_DIR/k8s/kubevirt-cr.yaml"
+
+  log "Waiting for KubeVirt to become Available (this pulls ~3 images, ~5-10 min)..."
+  kubectl -n kubevirt wait kv kubevirt --for condition=Available --timeout=600s
+
+  log "KubeVirt installed"
+
+  log "Installing virtctl..."
+  VIRTCTL_DIR="$REPO_DIR/bin"
+  mkdir -p "$VIRTCTL_DIR"
+  case "$(uname -m)" in
+    x86_64)  ARCH="amd64" ;;
+    aarch64) ARCH="arm64" ;;
+    *)       log "Unsupported host arch $(uname -m) for virtctl"; return 0 ;;
+  esac
+  curl -sSL -o "$VIRTCTL_DIR/virtctl" \
+    "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/virtctl-${KUBEVIRT_VERSION}-linux-${ARCH}"
+  chmod +x "$VIRTCTL_DIR/virtctl"
+  log "virtctl installed at $VIRTCTL_DIR/virtctl"
 }
 
 step_verify() {
@@ -263,6 +307,10 @@ step_verify() {
 
   log "OVN topology:"
   kubectl ko nbctl show 2>/dev/null || log "  (kubectl ko not available yet)"
+
+  log "KubeVirt:"
+  kubectl get kv -n kubevirt 2>/dev/null || log "  (KubeVirt not installed)"
+  kubectl get pods -n kubevirt 2>/dev/null || true
 
   log "Cluster info:"
   kubectl cluster-info
@@ -289,6 +337,12 @@ main() {
     kube-ovn)
       step_install_kube_ovn
       ;;
+    untaint)
+      step_untaint_control_plane
+      ;;
+    kubevirt)
+      step_install_kubevirt
+      ;;
     verify)
       step_verify
       ;;
@@ -299,10 +353,12 @@ main() {
       step_kubeadm_init
       step_join_control_plane
       step_install_kube_ovn
+      step_untaint_control_plane
+      step_install_kubevirt
       step_verify
       ;;
     *)
-      echo "Usage: $0 {all|provision|detect|init|join|kube-ovn|verify}"
+      echo "Usage: $0 {all|provision|detect|init|join|kube-ovn|untaint|kubevirt|verify}"
       exit 1
       ;;
   esac

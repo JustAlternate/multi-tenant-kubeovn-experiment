@@ -10,6 +10,8 @@ result-*
 # Kubernetes
 kubeconfig
 *.kubeconfig
+bin/
+virtctl
 
 # Secrets
 .env
